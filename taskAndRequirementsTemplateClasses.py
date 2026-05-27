@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Literal
+from typing import Literal, Any
 
 class algoIdentify(BaseModel):
     name: str
@@ -30,6 +30,8 @@ class stringVariable(BaseModel):
 
 class algoRequirements(BaseModel):
     identification: algoIdentify
+    inputFormat: Literal["xes", "csv"]
+    outputStructure: Literal["eventLog", "petriNet", "processTree", "bpmn", "dfg"]
     requirements: list[algoVariableFloat | algoVariableInt | algoVariableBool | stringVariable]
 
 class instruction(BaseModel):
@@ -37,10 +39,12 @@ class instruction(BaseModel):
 
 class instructionStatus(BaseModel):
     identification: algoIdentify
+    instructionId: str
     status: str
 
 class networkResult(BaseModel):
     task: str
+    instructionId: str
 
 class inputParameterInt(BaseModel):
     name: str
@@ -64,3 +68,20 @@ class inputParameterString(BaseModel):
 class workerTaskSet(BaseModel):
     name: str
     inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
+
+class logNamesOfTheLog(BaseModel):
+    xesLogName: str
+    csvLogName: str
+    description: str
+
+class instructionDetails(BaseModel):
+    instruction: str
+    instructionId: str
+    participatingWorkers: list[algoIdentify]
+    payload: list
+
+class resultWorkerProcessModel(BaseModel):
+    identification: algoIdentify
+    inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
+    outputModel: Any
+    additionalOutputData: list
