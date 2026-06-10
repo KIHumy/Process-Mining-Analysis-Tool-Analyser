@@ -7,14 +7,16 @@ class algoIdentify(BaseModel):
 
 class algoVariableFloat(BaseModel):
     name: str
-    lowerBound: float
-    upperBound: float
+    lowerBound: float | None
+    upperBound: float | None
+    autoAdept: bool
     type: Literal["float"] = "float"
 
 class algoVariableInt(BaseModel):
     name: str
-    lowerBound: int
-    upperBound: int
+    lowerBound: int | None
+    upperBound: int | None
+    autoAdept: bool
     type: Literal["int"] = "int"
 
 class algoVariableBool(BaseModel):
@@ -41,6 +43,7 @@ class instructionStatus(BaseModel):
     identification: algoIdentify
     instructionId: str
     status: str
+    fileId: str
 
 class networkResult(BaseModel):
     task: str
@@ -66,7 +69,7 @@ class inputParameterString(BaseModel):
     type: Literal["string"] = "string"
 
 class workerTaskSet(BaseModel):
-    name: str
+    identification: algoIdentify
     inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
 
 class logNamesOfTheLog(BaseModel):
@@ -79,9 +82,27 @@ class instructionDetails(BaseModel):
     instructionId: str
     participatingWorkers: list[algoIdentify]
     payload: list
+    finishedSubTasksForCompletion: int
+    fileIdList: list[str]
 
 class resultWorkerProcessModel(BaseModel):
     identification: algoIdentify
     inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
     outputModel: Any
     additionalOutputData: list
+
+class algoParameters(BaseModel):
+    name: str
+    fixedParameterList: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
+
+class autoComparisonTemplate(BaseModel):
+    algoList: list[str]
+    minimumPrecision: float
+    minimumFitness: float
+    logs: logNamesOfTheLog
+    fixedAlgoParameters: list[algoParameters]
+
+class complexWorkerTaskFilePointer(BaseModel):
+    identification: algoIdentify
+    instructionId: str
+    fileId: str

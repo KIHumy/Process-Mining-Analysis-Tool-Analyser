@@ -57,7 +57,14 @@ def resultSufficient(groundTruth, runResult):
     elif isinstance(runResult.outputModel, pm4py.objects.log.obj.EventLog) or isinstance(runResult.outputModel, pandas.DataFrame):
         comparisonObject, initial, final = pm4py.discovery.discover_petri_net_inductive(runResult.outputModel)
         k_anonymity = toolboxForAnalysis.calculateKAnonymity(runResult.outputModel)
-        print(f"The k anonymity of this log is: {k_anonymity}")
+        l_diversity = toolboxForAnalysis.calculateLDiversity(runResult.outputModel)
+        print(f"The k anonymity of this log is: {k_anonymity}", flush= True)
+        print(f"The l-diversity of the log is: {l_diversity}", flush= True)
+        dfgFromLog = pm4py.discovery.discover_dfg(runResult.outputModel)
+        l_diversity_dfg = toolboxForAnalysis.calculateLDiversityForDFG(dfgFromLog)
+        l_diversity_Petri_Net = toolboxForAnalysis.calculateLDiversityForPetriNet(comparisonObject)
+        print(f"The l diversity for the petri net is: {l_diversity_Petri_Net}")
+        print(f"The l diversity for the dfg process model of this log is: {l_diversity_dfg}")
     else:
         comparisonObject = runResult.outputModel
         initial = comparisonObject.additionalOutputData[0]
@@ -68,7 +75,7 @@ def resultSufficient(groundTruth, runResult):
     fitness = fitnessDict["average_trace_fitness"]
     startCheckingFunction(precision, fitness)
 
-def startAnalyzer(inputTask, requirementsList):
+def startAnalyzer(inputTask, requirementsList, workerFilePointerList):
     print("Starting the analyzer.", flush= True)
     lokalRunStorage = []
     taskDetails = inputTask.payload
@@ -94,30 +101,32 @@ def startAnalyzer(inputTask, requirementsList):
                     outputEnding = "bpmn"
                 if requirements.outputStructure == "dfg":
                     outputEnding = "dfg"
-        uploadFilePath = "./dockerNetworkDirectory/workerFiles/" + workers.name + "/output/output_" + workers.name.lower() + "_run_" + inputTask.instructionId + "." + outputEnding
-        if pathlib.Path.exists(pathlib.Path(uploadFilePath)):
-            storedParameters = []
-            for parameterSet in inputParameterList:
-                    if workers.name == parameterSet.name:
-                        storedParameters = parameterSet.inputParameters
-            if outputEnding == "xes":
-                newLog = pm4py.read.read_xes(uploadFilePath)
-                lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newLog, additionalOutputData= []))
-            if outputEnding == "ptml":
-                newProcessTree = pm4py.read.read_ptml(uploadFilePath)
-                lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newProcessTree, additionalOutputData= []))
-            if outputEnding == "pnml":
-                newPetriNet, initial, final = pm4py.read.read_pnml(uploadFilePath)
-                lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newPetriNet, additionalOutputData= [initial, final]))
-            if outputEnding == "bpmn":
-                newBPMN = pm4py.read.read_bpmn(uploadFilePath)
-                lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newBPMN, additionalOutputData= []))
-            if outputEnding == "dfg":
-                newDFG = pm4py.read.read_dfg(uploadFilePath)
-                lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newDFG, additionalOutputData= []))
-            print("Successfully loaded worker output of " + workers.name + ".", flush= True)
-        else:
-            print("Worker output was not found.", flush= True)
+        for fileReference in workerFilePointerList:
+            if fileReference.identification.name == workers.name and fileReference.identification.id == workers.id:
+                uploadFilePath = "./dockerNetworkDirectory/workerFiles/" + workers.name + "/output/output_" + workers.name.lower() + "_" + workers.id + "_run_" + inputTask.instructionId + "_" + fileReference.fileId + "." + outputEnding
+                if pathlib.Path.exists(pathlib.Path(uploadFilePath)):
+                    storedParameters = []
+                    for parameterSet in inputParameterList:
+                            if workers.name == parameterSet.identification.name and workers.id == parameterSet.identification.id:
+                                storedParameters = parameterSet.inputParameters
+                    if outputEnding == "xes":
+                        newLog = pm4py.read.read_xes(uploadFilePath)
+                        lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newLog, additionalOutputData= []))
+                    if outputEnding == "ptml":
+                        newProcessTree = pm4py.read.read_ptml(uploadFilePath)
+                        lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newProcessTree, additionalOutputData= []))
+                    if outputEnding == "pnml":
+                        newPetriNet, initial, final = pm4py.read.read_pnml(uploadFilePath)
+                        lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newPetriNet, additionalOutputData= [initial, final]))
+                    if outputEnding == "bpmn":
+                        newBPMN = pm4py.read.read_bpmn(uploadFilePath)
+                        lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newBPMN, additionalOutputData= []))
+                    if outputEnding == "dfg":
+                        newDFG = pm4py.read.read_dfg(uploadFilePath)
+                        lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newDFG, additionalOutputData= []))
+                    print("Successfully loaded worker output of " + workers.name + ".", flush= True)
+                else:
+                    print("Worker output was not found.", flush= True)
         
     originalEventLogData = generateGroundTruth(inputEventLog)
     if originalEventLogData == {}:
