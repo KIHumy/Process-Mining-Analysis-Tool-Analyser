@@ -10,6 +10,8 @@ class algoVariableFloat(BaseModel):
     lowerBound: float | None
     upperBound: float | None
     autoAdept: bool
+    autoStart: float | None
+    autoSigma: float | None
     type: Literal["float"] = "float"
 
 class algoVariableInt(BaseModel):
@@ -17,6 +19,8 @@ class algoVariableInt(BaseModel):
     lowerBound: int | None
     upperBound: int | None
     autoAdept: bool
+    autoStart: int | None
+    autoSigma: int | None
     type: Literal["int"] = "int"
 
 class algoVariableBool(BaseModel):
@@ -38,6 +42,10 @@ class algoRequirements(BaseModel):
 
 class instruction(BaseModel):
     instruction: str
+
+class conversionDetails(BaseModel):
+    instruction: str
+    file: str
 
 class instructionStatus(BaseModel):
     identification: algoIdentify
@@ -90,6 +98,9 @@ class resultWorkerProcessModel(BaseModel):
     inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
     outputModel: Any
     additionalOutputData: list
+    instructionId: str
+    fileId: str
+    fileName: str
 
 class algoParameters(BaseModel):
     name: str
@@ -106,3 +117,42 @@ class complexWorkerTaskFilePointer(BaseModel):
     identification: algoIdentify
     instructionId: str
     fileId: str
+
+class parameterMatch(BaseModel):
+    name: str
+    originalValue: int | float
+    usedValue: int | float
+
+
+class taskParameterMatch(BaseModel):
+    instructionId: str
+    fileId: str
+    matchingParameters: list[parameterMatch]
+    candidate: Any | None
+    score: float
+
+class autoCompareInformation(BaseModel):
+    autoComparisonId: str
+    precisionTarget: float
+    fitnessTarget: float
+
+class runEvaluation(BaseModel):
+    fileName: str
+    precision: float
+    fitness: float
+    caseDisclosureRisk: list | None
+    traceDisclosureRisk: list | None
+    k_anonymity: int | None
+    inputParameters: list
+
+class algoEvaluation(BaseModel):
+    name: str
+    evaluationReports: list[runEvaluation]
+
+class evaluationReport(BaseModel):
+    inputEventLog: logNamesOfTheLog
+    taskInformation: autoCompareInformation | str
+    evaluationOfAlgos: list[algoEvaluation]
+
+class timeoutMessage(BaseModel):
+    timeout: float
