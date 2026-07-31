@@ -91,7 +91,7 @@ def calculatePrecisionOfPetriNet(groundTruthEventLog, comparisonObject, initial,
 
 def calculateFitnessOfPetriNet(groundTruthEventLog, comparisonObject, initial, final):
     fitnessDict = pm4py.conformance.fitness_token_based_replay(groundTruthEventLog, comparisonObject, initial, final)
-    fitness = fitnessDict["average_trace_fitness"]
+    fitness = fitnessDict["log_fitness"]
     print(f"The fitness is: {fitness}", flush= True)
     return fitness
 
@@ -157,6 +157,8 @@ def loaderOfResults(inputTask, requirementsList, workerFilePointerList):
                                 storedParameters = parameterSet.inputParameters
                     if outputEnding == "xes":
                         newLog = pm4py.read.read_xes(uploadFilePath)
+                        if isinstance(newLog, pandas.DataFrame):
+                            newLog = orderDataFrame(newLog)
                         lokalRunStorage.append(taskAndRequirementsTemplateClasses.resultWorkerProcessModel(identification= workers, inputParameters= storedParameters, outputModel= newLog, additionalOutputData= [], instructionId= inputTask.instructionId, fileId= fileReference.fileId, fileName= fileName))
                     if outputEnding == "ptml":
                         newProcessTree = pm4py.read.read_ptml(uploadFilePath)
@@ -174,6 +176,30 @@ def loaderOfResults(inputTask, requirementsList, workerFilePointerList):
                 else:
                     print("Worker output was not found.", flush= True)
     return lokalRunStorage, inputEventLog
+
+def orderDataFrame(log):
+    columnsList = log.columns
+    caseId = "someString"
+    activity = "someString"
+    timeStamp = "someString"
+    #extraGroupOption = "someString"
+    for elements in columnsList:
+        if elements.lower() == "case id" or elements.lower() == "case_id" or elements.lower() == "case:concept:name":
+            caseId = elements
+        elif elements.lower() == "activity" or elements.lower() == "concept:name":
+            activity = elements
+        elif elements.lower() == "timestamp" or elements.lower() == "complete timestamp" or elements.lower() == "time:timestamp":
+            timeStamp = elements
+    if caseId != "someString" and activity != "someString" and timeStamp != "someString":
+        eventLog = pm4py.format_dataframe(log, case_id= caseId, activity_key= activity, timestamp_key= timeStamp)
+        sortedEventLog = eventLog.sort_values(["case:concept:name", "time:timestamp"])
+    elif caseId != "someString" and activity != "someString":
+        eventLog = pm4py.format_dataframe(log, case_id= caseId, activity_key= activity)
+        sortedEventLog = eventLog.sort_values(["case:concept:name"], kind= "stable")
+    else:
+        print("Log cannot be sorted. Can not identify case or timestamp.")
+        sortedEventLog = log
+    return sortedEventLog
 
 def startAnalyzer(inputTask, requirementsList, workerFilePointerList):
     print("Starting the analyzer.", flush= True)
@@ -246,7 +272,7 @@ def calculateTraceDisclosureRiskForEventLog(groundTruthEventLog, eventLog):
         print(f"This is the event log when it is a pandas dataframe: {groundTruthEventLog}", flush= True)
         correctedCompareList = toolboxForAnalysis.generateCandidateSetList(groundTruthEventLog)
         generatedMatchList = toolboxForAnalysis.generateMatchSetList(correctedCompareList, eventLog)
-        traceVariants = pm4py.statistics.variants.pandas.get.get_variants_count(eventLog)
+        #traceVariants = pm4py.statistics.variants.pandas.get.get_variants_count(eventLog)
         resultList = []
         #numberOfTraces = float(eventLog[pm4py.util.constants.CASE_CONCEPT_NAME].nunique())
         for lengths in generatedMatchList:
@@ -266,9 +292,10 @@ def calculateTraceDisclosureRiskForEventLog(groundTruthEventLog, eventLog):
                 maxEntropy = -(numberOfTraces * 1/numberOfTraces * math.log2(1/numberOfTraces))
                 for elements in uniqueTracesMatchList:
                     occurence = 0.0
-                    for trace, count in traceVariants.items():
-                        if elements == list(trace):
-                            occurence = float(count)
+                    occurence = float(candidates["matchingTraces"].count(elements))
+                    #for trace, count in traceVariants.items():
+                        #if elements == list(trace):
+                            #occurence = float(count)
                     #for caseId, traceInResultLog in eventLog:
                     #    if elements == traceInResultLog["concept:name"].tolist():
                     #        occurence = occurence + 1.0
@@ -292,9 +319,23 @@ def calculateTraceDisclosureRiskForEventLog(groundTruthEventLog, eventLog):
 def executeAnalysis(analysesResults, groundTruth, additionalInformation):
     print(f"These are the analyses results: {analysesResults}", flush= True)
     if additionalInformation == None:
-        newEvaluationReport = taskAndRequirementsTemplateClasses.evaluationReport(inputEventLog= groundTruth["logFiles"], taskInformation= "Standard Task", evaluationOfAlgos= [])
+        newEvaluationReport = taskAndRequirementsTemplateClasses.evaluationReport(inputEventLog= groundTruth["logFiles"], taskInformation= "Standard Task", evaluationOfAlgos= [], groundTruthUtilityAndPrivacy= None)
     else:
-        newEvaluationReport = taskAndRequirementsTemplateClasses.evaluationReport(inputEventLog= groundTruth["logFiles"], taskInformation= additionalInformation, evaluationOfAlgos= [])
+        newEvaluationReport = taskAndRequirementsTemplateClasses.evaluationReport(inputEventLog= groundTruth["logFiles"], taskInformation= additionalInformation, evaluationOfAlgos= [], groundTruthUtilityAndPrivacy= None)
+    groundTruthPetriNet, groundTruthInitial, groundTruthFinal = groundTruth["petriNet"]
+    groundTruthPrecision = calculatePrecisionOfPetriNet(groundTruth["eventLog"], groundTruthPetriNet, groundTruthInitial, groundTruthFinal)
+    groundTruthFitness = calculateFitnessOfPetriNet(groundTruth["eventLog"], groundTruthPetriNet, groundTruthInitial, groundTruthFinal)
+    if isinstance(groundTruth["eventLog"], pm4py.objects.log.obj.EventLog):
+        print("Convert log to pandas.Dataframe.", flush= True)
+        groundTruthLog = pm4py.objects.conversion.log.converter.apply(log= groundTruth["eventLog"], variant= pm4py.objects.conversion.log.converter.Variants.TO_DATA_FRAME)
+    else:
+        groundTruthLog = groundTruth["eventLog"]#results.outputModel
+    groundTruthLog = orderDataFrame(groundTruthLog)
+    groundTruthKAnonymity = toolboxForAnalysis.calculateKAnonymity(groundTruthLog)
+    groundTruthCaseDisclosureRisk= calculateCaseDisclosureRiskForEventLog(groundTruthLog, groundTruthLog)
+    groundTruthTraceDisclosureRisk= calculateTraceDisclosureRiskForEventLog(groundTruthLog, groundTruthLog)
+    groundTruthUtilityAndPrivacy = taskAndRequirementsTemplateClasses.groundTruthUtilityAndPrivacyData(precision= groundTruthPrecision, fitness= groundTruthFitness, k_anonymity= groundTruthKAnonymity, caseDisclosureRisk= groundTruthCaseDisclosureRisk, traceDisclosureRisk= groundTruthTraceDisclosureRisk)
+    newEvaluationReport.groundTruthUtilityAndPrivacy = groundTruthUtilityAndPrivacy
     for results in analysesResults:
         petriNet, initial, final, successful = convertToPetriNet(results.outputModel)
         precision = 0
@@ -314,11 +355,7 @@ def executeAnalysis(analysesResults, groundTruth, additionalInformation):
                 resultLog = pm4py.objects.conversion.log.converter.apply(log= results.outputModel, variant= pm4py.objects.conversion.log.converter.Variants.TO_DATA_FRAME)
             else:
                 resultLog = results.outputModel
-            if isinstance(groundTruth["eventLog"], pm4py.objects.log.obj.EventLog):
-                print("Convert log to pandas.Dataframe.", flush= True)
-                groundTruthLog = pm4py.objects.conversion.log.converter.apply(log= groundTruth["eventLog"], variant= pm4py.objects.conversion.log.converter.Variants.TO_DATA_FRAME)
-            else:
-                groundTruthLog = groundTruth["eventLog"]#results.outputModel
+            resultLog = orderDataFrame(resultLog)
             caseDisclosureRiskList = calculateCaseDisclosureRiskForEventLog(groundTruthLog, resultLog)
             traceDisclosureRiskList = calculateTraceDisclosureRiskForEventLog(groundTruthLog, resultLog)
             k_anonymity = toolboxForAnalysis.calculateKAnonymity(resultLog)
@@ -339,11 +376,12 @@ def executeAnalysis(analysesResults, groundTruth, additionalInformation):
         return
     else:
         ordnerPath = "./dockerNetworkDirectory/output/auto_comparison_" + additionalInformation.autoComparisonId
-    pathlib.Path(ordnerPath).mkdir(exist_ok= True)
+    pathlib.Path(ordnerPath).mkdir()
     with open(ordnerPath + "/mainEvaluationReport.json", "w") as openFile:
         json.dump(newEvaluationReport.model_dump(), openFile, indent=3)
     for resultObject in analysesResults:
         loadPath = pathlib.Path("./dockerNetworkDirectory/workerFiles/" + resultObject.identification.name + "/output/" + resultObject.fileName)
         targetDirectory = pathlib.Path(ordnerPath + "/" + resultObject.fileName)
         targetDirectory.write_bytes(loadPath.read_bytes()) #copy xes log to worker input
+        print("The analysis is finished.", flush= True)
     return

@@ -34,11 +34,17 @@ class stringVariable(BaseModel):
     description: str
     type: Literal["string"] = "string"
 
+class listVariable(BaseModel):
+    name: str
+    value: list
+    description: str
+    type: Literal["list"] = "list"
+
 class algoRequirements(BaseModel):
     identification: algoIdentify
     inputFormat: Literal["xes", "csv"]
     outputStructure: Literal["eventLog", "petriNet", "processTree", "bpmn", "dfg"]
-    requirements: list[algoVariableFloat | algoVariableInt | algoVariableBool | stringVariable]
+    requirements: list[algoVariableFloat | algoVariableInt | algoVariableBool | stringVariable | listVariable]
 
 class instruction(BaseModel):
     instruction: str
@@ -76,9 +82,14 @@ class inputParameterString(BaseModel):
     value: str
     type: Literal["string"] = "string"
 
+class inputParameterList(BaseModel):
+    name: str
+    value: list
+    type: Literal["list"] = "list"
+
 class workerTaskSet(BaseModel):
     identification: algoIdentify
-    inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
+    inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool | inputParameterList]
 
 class logNamesOfTheLog(BaseModel):
     xesLogName: str
@@ -95,7 +106,7 @@ class instructionDetails(BaseModel):
 
 class resultWorkerProcessModel(BaseModel):
     identification: algoIdentify
-    inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
+    inputParameters: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool | inputParameterList]
     outputModel: Any
     additionalOutputData: list
     instructionId: str
@@ -104,7 +115,7 @@ class resultWorkerProcessModel(BaseModel):
 
 class algoParameters(BaseModel):
     name: str
-    fixedParameterList: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool]
+    fixedParameterList: list[inputParameterInt | inputParameterFloat | inputParameterString | algoVariableBool | inputParameterList]
 
 class autoComparisonTemplate(BaseModel):
     algoList: list[str]
@@ -149,10 +160,18 @@ class algoEvaluation(BaseModel):
     name: str
     evaluationReports: list[runEvaluation]
 
+class groundTruthUtilityAndPrivacyData(BaseModel):
+    precision: float
+    fitness: float
+    k_anonymity: int | None
+    caseDisclosureRisk: list | None
+    traceDisclosureRisk: list | None
+
 class evaluationReport(BaseModel):
     inputEventLog: logNamesOfTheLog
     taskInformation: autoCompareInformation | str
     evaluationOfAlgos: list[algoEvaluation]
+    groundTruthUtilityAndPrivacy: None | groundTruthUtilityAndPrivacyData
 
 class timeoutMessage(BaseModel):
     timeout: float

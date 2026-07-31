@@ -53,20 +53,21 @@ def convertLog(conversionMessage: taskAndRequirementsTemplateClasses.conversionD
     if conversionMessage.instruction != "convert":
         raise HTTPException(400, "This instruction should not appear here.")
     else:
-        fileName = conversionMessage.file
-        fileList = fileName.rsplit(".", 1)
-        if len(fileList) < 2:
+        filePathPathObject = pathlib.Path(conversionMessage.file)
+        if not filePathPathObject.suffix:
             raise HTTPException(400, "Invalid file name")
         else:
-            ending = fileList[1]
+            fileName = conversionMessage.file
+            ending = filePathPathObject.suffix
+            nameWithoutEnding = filePathPathObject.stem
             targetPath = "./dockerNetworkDirectory/input/" + fileName
-            convertedLogPath = "./dockerNetworkDirectory/input/" + fileList[0] + "_converted"
+            convertedLogPath = "./dockerNetworkDirectory/input/" + nameWithoutEnding + "_converted"
             if pathlib.Path.exists(pathlib.Path(targetPath)):
-                if ending == "xes":
+                if ending == ".xes":
                     protoEventLog = pm4py.read.read_xes(targetPath)
                     eventLog = pm4py.convert_to_dataframe(protoEventLog)
                     eventLog.to_csv(pathlib.Path(convertedLogPath + ".csv"), sep= ";", index= False)
-                elif ending == "csv":
+                elif ending == ".csv":
                     protoEventLog = pandas.read_csv(pathlib.Path(targetPath), sep= ";")
                     columnsList = protoEventLog.columns
                     caseId = "someString"
@@ -74,18 +75,18 @@ def convertLog(conversionMessage: taskAndRequirementsTemplateClasses.conversionD
                     timeStamp = "someString"
                     #extraGroupOption = "someString"
                     for elements in columnsList:
-                        if elements.lower() == "case id" or elements.lower() == "case_id":
+                        if elements.lower() == "case id" or elements.lower() == "case_id" or elements.lower() == "case:concept:name":
                             caseId = elements
                         elif elements.lower() == "activity" or elements.lower() == "concept:name":
                             activity = elements
-                        elif elements.lower() == "timestamp" or elements.lower() == "complete timestamp" or elements.lower() == "dd-mm-yyyy:hh.mm":
+                        elif elements.lower() == "timestamp" or elements.lower() == "complete timestamp" or elements.lower() == "time:timestamp":
                             timeStamp = elements
                     if caseId != "someString" and activity != "someString" and timeStamp != "someString":
                         eventLog = pm4py.format_dataframe(protoEventLog, case_id= caseId, activity_key= activity, timestamp_key= timeStamp)
                         sortedEventLog = eventLog.sort_values(["case:concept:name", "time:timestamp"])
                     elif caseId != "someString" and activity != "someString":
                         eventLog = pm4py.format_dataframe(protoEventLog, case_id= caseId, activity_key= activity)
-                        sortedEventLog = eventLog.sort_values(["case:concept:name"])
+                        sortedEventLog = eventLog.sort_values(["case:concept:name"], kind= "stable")
                     else:
                         raise HTTPException(400, "Log can not be converted missing values.")
                     xesEventLog = pm4py.convert_to_event_log(sortedEventLog)
@@ -119,6 +120,9 @@ def transformAlgoVariablesToInputParameters(attributes):
     if isinstance(attributes, taskAndRequirementsTemplateClasses.stringVariable):
         stringInputValue = taskAndRequirementsTemplateClasses.inputParameterString(name= attributes.name, value= attributes.value)
         return stringInputValue
+    if isinstance(attributes, taskAndRequirementsTemplateClasses.listVariable):
+        listInputVariable = taskAndRequirementsTemplateClasses.inputParameterList(name= attributes.name, value= attributes.value)
+        return listInputVariable
 
 @server.post("/instruction", status_code=200)
 async def startInstructionHandler(task: taskAndRequirementsTemplateClasses.instruction):
@@ -431,7 +435,7 @@ def automaticOptimizerTaskDistribution(optimizingTaskId, name):
                             print(f"This is the current candidate: {newInput}")
                             newInstructionParameterList = []
                             newFileId = uuid.uuid4().hex
-                            fileIdentifierList.append(newFileId) #this is not used yet maybe this causes an error
+                            fileIdentifierList.append(newFileId)
                             #counter = 0
                             newCandidateParameterSet = taskAndRequirementsTemplateClasses.taskParameterMatch(instructionId= newInstructionId, fileId= newFileId, matchingParameters= [], candidate= newInput[1], score= 1000.0)
                             for inputParameters in optimizers["softParameters"]:
@@ -671,7 +675,7 @@ def startNextIteration(searchedTask, algoRequirementsList, workerFilePointerList
                                 #for parameters in parameterMatches.matchingParameters:
                                 #    resultSetForOpt[parameters.name] = parameters.originalValue
                                 parameterMatches.score = resultScore
-                                candidateList.append(parameterMatches.candidate) #resultSetForOpt
+                                candidateList.append(parameterMatches) #resultSetForOpt
                                 with globalResultInputSetMatchLock:
                                     globalResultInputSetMatchList.append({"parameterMatch": copy.deepcopy(parameterMatches), "resultScore": resultScore})
                                     print(f"This is the global result input parameter set match list: {globalResultInputSetMatchList}")
@@ -683,7 +687,14 @@ def startNextIteration(searchedTask, algoRequirementsList, workerFilePointerList
                             if tasksInGlobalOptimizerStore["optimizingTaskId"] == optimizerTasks["optimizingTaskId"]:
                                 for optimizerReal in tasksInGlobalOptimizerStore["listOfOptimizers"]:
                                     if optimizerReal["name"] == taskInOptList["name"]:
-                                        for candidateElement, resultElement in tellList:       
+                                        newTellList = []
+                                        for matchElement, matchElementScore in tellList:
+                                            for realParameterMatches in optimizerReal["listOfMatchingParameters"]:
+                                                if matchElement.instructionId == realParameterMatches.instructionId and matchElement.fileId == realParameterMatches.fileId:
+                                                    realParameterMatches.score = matchElement.score
+                                                    newTellListRecord = (realParameterMatches.candidate, matchElementScore)
+                                                    newTellList.append(newTellListRecord)
+                                        for candidateElement, resultElement in newTellList:       
                                             optimizerReal["optimizer"].tell(candidateElement, resultElement)
                                         shouldWeProceed = True
                                         if optimizerReal["optimizer"].num_tell >= optimizerReal["optimizer"].budget:
@@ -691,6 +702,8 @@ def startNextIteration(searchedTask, algoRequirementsList, workerFilePointerList
                     if shouldWeProceed:
                         automaticOptimizerTaskDistribution(optimizingTaskId= optimizerTasks["optimizingTaskId"], name= taskInOptList["name"])
                     else:
+                        #This is a list to detect an error
+                        scoreListTwo = []
                         with optimizerStoreLock:
                             for globalOptimizerStoreObjects in optimizerListStoreGlobal:
                                 if globalOptimizerStoreObjects["optimizingTaskId"] == optimizerTasks["optimizingTaskId"]:
@@ -714,14 +727,19 @@ def startNextIteration(searchedTask, algoRequirementsList, workerFilePointerList
                                             if len(uniqueAlgos["listOfMatchingParameters"]) == 0:
                                                 print("Result list is empty for at least one participant. Analysis failed.", flush= True)
                                                 return
+                                            searchedCandidate = uniqueAlgos["listOfMatchingParameters"][0]
                                             for parameterMatchesInOptList in uniqueAlgos["listOfMatchingParameters"]:
+
+                                                #This is a statement to detect an error
+                                                scoreListTwo.append(parameterMatchesInOptList.score)
+
                                                 print(f"This is the current parameter match {parameterMatchesInOptList}", flush= True)
                                                 print(f"This is the current score of the parameter: {parameterMatchesInOptList.score}", flush= True)
-                                                if parameterMatchesInOptList == uniqueAlgos["listOfMatchingParameters"][0]:
+                                                #if parameterMatchesInOptList == uniqueAlgos["listOfMatchingParameters"][0]:
+                                                #    searchedCandidate = parameterMatchesInOptList
+                                                #else:
+                                                if searchedCandidate.score > parameterMatchesInOptList.score:
                                                     searchedCandidate = parameterMatchesInOptList
-                                                else:
-                                                    if searchedCandidate.score > parameterMatchesInOptList.score:
-                                                        searchedCandidate = parameterMatchesInOptList
                                                 print(f"This is the new searched candidate score: {searchedCandidate.score}", flush= True)
                                             #searchedCandidate = uniqueAlgos["optimizer"].provide_recommendation()
                                             searchedInstructionId = searchedCandidate.instructionId
@@ -756,6 +774,8 @@ def startNextIteration(searchedTask, algoRequirementsList, workerFilePointerList
                             print(f"This is a subList output: {subList}", flush= True)
                             workerFileRelationList.append(subList)
                         analyzer.enterFinalAnalysis(multiTaskList, algoRequirementsList, workerFileRelationList, copy.deepcopy(optimizerTasks), copy.deepcopy(searchedIdList))
+                        print(f"This is the global result input set match list: {globalResultInputSetMatchList}", flush= True)
+                        print(f"These are the utility scores the algorithm utilizes for its decision: {scoreListTwo}", flush= True)
     return
 
 def taskKiller():
