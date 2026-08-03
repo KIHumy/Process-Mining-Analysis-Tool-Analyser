@@ -13,6 +13,7 @@ import datetime
 from threading import Lock
 import pm4py
 import pandas
+import math
 
 globalNetTimeout = datetime.timedelta(minutes= 5.0)
 globalWorkerTimeout = datetime.timedelta(minutes = 5.0)
@@ -516,6 +517,15 @@ def startAutoAnalyses(autoInputTemplate: taskAndRequirementsTemplateClasses.auto
     logsAccessible, xesLogName, csvLogName = checkIfLogsAvailable(autoInputTemplate.logs)
     if logsAccessible == False:
         raise HTTPException(400, "At least one of the logs was not found.")
+    groundTruthLog = pm4py.read.read_xes("./dockerNetworkDirectory/input/" + xesLogName)
+    if isinstance(groundTruthLog, pm4py.objects.log.obj.EventLog):
+        print("Convert log to pandas.Dataframe.", flush= True)
+        groundTruthLog = pm4py.objects.conversion.log.converter.apply(log= groundTruthLog, variant= pm4py.objects.conversion.log.converter.Variants.TO_DATA_FRAME)
+        groundTruthLog = analyzer.orderDataFrame(groundTruthLog)
+    else:
+        groundTruthLog = analyzer.orderDataFrame(groundTruthLog)
+        number_of_traces = groundTruthLog["case:concept:name"].nunique()
+        max_trace_length = analyzer.getMaxTraceLength(groundTruthLog)
     algoNamesWithoutDuplicatesList = []
     for algoNamesWithDuplicates in autoInputTemplate.algoList:
         if algoNamesWithDuplicates in algoNamesWithoutDuplicatesList:
@@ -556,6 +566,37 @@ def startAutoAnalyses(autoInputTemplate: taskAndRequirementsTemplateClasses.auto
         for requirement in requirementsList:
             print(f"This is a parameter for the auto comparison: {requirement}")
             if isinstance(requirement, taskAndRequirementsTemplateClasses.algoVariableInt) and requirement.autoAdept:
+                lowerBound = None
+                upperBound = None
+                autoStart = None
+                if requirement.lowerBound != None:
+                    lowerBound = requirement.lowerBound
+                elif requirement.keyWordBoundLower != None:
+                    if requirement.keyWordBoundLower == "MAX_TRACE_LENGTH":
+                        lowerBound = max_trace_length
+                    if requirement.keyWordBoundLower == "NUMBER_OF_TRACES":
+                        lowerBound = number_of_traces
+                if requirement.upperBound != None:
+                    upperBound = requirement.upperBound
+                elif requirement.keyWordBoundUpper != None:
+                    if requirement.keyWordBoundUpper == "MAX_TRACE_LENGTH":
+                        upperBound = max_trace_length
+                    if requirement.keyWordBoundUpper == "NUMBER_OF_TRACES":
+                        upperBound = number_of_traces
+                if requirement.autoStart != None:
+                    autoStart = requirement.autoStart
+                else:
+                    if lowerBound != None:
+                        autoStart = lowerBound
+                    elif lowerBound == None and upperBound != None:
+                        autoStart = upperBound
+                    else:
+                        autoStart = 0
+                if requirement.relativeInitial != None:
+                    if requirement.relativeInitial <= 1.0 and requirement.relativeInitial >= 0.0 and upperBound != None and lowerBound != None:
+                        autoStart = math.ceil(float(lowerBound)  + (abs(float(upperBound) - float(lowerBound)) * requirement.relativeInitial))
+                        if autoStart > upperBound:
+                            autoStart = upperBound
                 #if requirement.lowerBound is None:
                 #    newValueForInputVektor = 0.0
                 #else: 
@@ -564,14 +605,30 @@ def startAutoAnalyses(autoInputTemplate: taskAndRequirementsTemplateClasses.auto
                 #    newValueForInputVektor = newValueForInputVektor + 5.0
                 #else:
                 #    newValueForInputVektor = newValueForInputVektor + ((float(requirement.upperBound) - newValueForInputVektor) / 2.0)
-                if requirement.lowerBound is not None and requirement.upperBound is not None:
-                    optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart, lower= requirement.lowerBound, upper= requirement.upperBound).set_integer_casting()
-                elif requirement.lowerBound is None and requirement.upperBound is None:
-                    optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart).set_integer_casting()
-                elif requirement.lowerBound is not None and requirement.upperBound is None:
-                    optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart, lower= requirement.lowerBound).set_integer_casting()
+                if requirement.choice == "exp_b_2" and upperBound is not None:
+                    choiceList = [1]
+                    newChoiceParameter = 2
+                    while newChoiceParameter < upperBound:
+                        choiceList.append(newChoiceParameter)
+                        newChoiceParameter = newChoiceParameter * 2                    
+                    choiceList.append(upperBound)
+                    optDict[requirement.name] = nevergrad.p.TransitionChoice(choiceList)
+                elif lowerBound is not None and upperBound is not None:
+                    optDict[requirement.name] = nevergrad.p.Scalar(init= autoStart, lower= lowerBound, upper= upperBound).set_integer_casting()
+                elif lowerBound is None and upperBound is None:
+                    optDict[requirement.name] = nevergrad.p.Scalar(init= autoStart).set_integer_casting() 
+                elif lowerBound is not None and upperBound is None:
+                    optDict[requirement.name] = nevergrad.p.Scalar(init= autoStart, lower= lowerBound).set_integer_casting() 
                 else:
-                    optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart, upper= requirement.upperBound).set_integer_casting()
+                    optDict[requirement.name] = nevergrad.p.Scalar(init= autoStart, upper= upperBound).set_integer_casting()
+                #if requirement.lowerBound is not None and requirement.upperBound is not None:
+                    #optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart, lower= requirement.lowerBound, upper= requirement.upperBound).set_integer_casting()
+                #elif requirement.lowerBound is None and requirement.upperBound is None:
+                    #optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart).set_integer_casting() 
+                #elif requirement.lowerBound is not None and requirement.upperBound is None:
+                    #optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart, lower= requirement.lowerBound).set_integer_casting() 
+                #else:
+                    #optDict[requirement.name] = nevergrad.p.Scalar(init= requirement.autoStart, upper= requirement.upperBound).set_integer_casting()
                 newValueForInputVektor = requirement.autoStart
                 #lowerBoundList.append(requirement.lowerBound)
                 #upperBoundList.append(requirement.upperBound)
@@ -579,6 +636,30 @@ def startAutoAnalyses(autoInputTemplate: taskAndRequirementsTemplateClasses.auto
                 inputVektor.append(newValueForInputVektor)
                 softParameterList.append(taskAndRequirementsTemplateClasses.inputParameterInt(name= requirement.name, value= newValueForInputVektor, type= "int")) #int(round(newValueForInputVektor))
             if isinstance(requirement, taskAndRequirementsTemplateClasses.algoVariableFloat) and requirement.autoAdept:
+                lowerBound = None
+                upperBound = None
+                autoStart = None
+                if requirement.lowerBound != None:
+                    lowerBound = requirement.lowerBound
+                elif requirement.keyWordBoundLower != None:
+                    if requirement.keyWordBoundLower == "MAX_TRACE_LENGTH":
+                        lowerBound = max_trace_length
+                    if requirement.keyWordBoundLower == "NUMBER_OF_TRACES":
+                        lowerBound = number_of_traces
+                if requirement.upperBound != None:
+                    upperBound = requirement.upperBound
+                elif requirement.keyWordBoundUpper != None:
+                    if requirement.keyWordBoundUpper == "MAX_TRACE_LENGTH":
+                        upperBound = max_trace_length
+                    if requirement.keyWordBoundUpper == "NUMBER_OF_TRACES":
+                        upperBound = number_of_traces
+                if requirement.autoStart != None:
+                    autoStart = requirement.autoStart
+                if requirement.relativeInitial != None:
+                    if requirement.relativeInitial <= 1.0 and requirement.relativeInitial >= 0.0 and upperBound != None and lowerBound != None:
+                        autoStart = lowerBound  + (abs(upperBound - lowerBound) * requirement.relativeInitial)
+                        if autoStart > upperBound:
+                            autoStart = upperBound
                 #if requirement.lowerBound is None:
                 #    newValueForInputVektor = 0.0
                 #else: 
@@ -587,14 +668,30 @@ def startAutoAnalyses(autoInputTemplate: taskAndRequirementsTemplateClasses.auto
                 #    newValueForInputVektor = newValueForInputVektor + 5.0
                 #else:
                 #    newValueForInputVektor = newValueForInputVektor + ((requirement.upperBound - newValueForInputVektor) / 2.0)
-                if requirement.lowerBound is not None and requirement.upperBound is not None:
-                    optDict[requirement.name] = nevergrad.p.Scalar(lower= requirement.lowerBound, upper= requirement.upperBound)
-                elif requirement.lowerBound is None and requirement.upperBound is None:
+                if requirement.choice == "exp_b_2" and upperBound is not None:
+                    choiceList = [1.0]
+                    newChoiceParameter = 2.0
+                    while newChoiceParameter < upperBound:
+                        choiceList.append(newChoiceParameter)
+                        newChoiceParameter = newChoiceParameter * 2.0                    
+                    choiceList.append(upperBound)
+                    optDict[requirement.name] = nevergrad.p.TransitionChoice(choiceList)
+                elif lowerBound is not None and upperBound is not None:
+                    optDict[requirement.name] = nevergrad.p.Scalar(lower= lowerBound, upper= upperBound)
+                elif lowerBound is None and upperBound is None:
                     optDict[requirement.name] = nevergrad.p.Scalar()
-                elif requirement.lowerBound is not None and requirement.upperBound is None:
-                    optDict[requirement.name] = nevergrad.p.Scalar(lower= requirement.lowerBound)
+                elif lowerBound is not None and upperBound is None:
+                    optDict[requirement.name] = nevergrad.p.Scalar(lower= lowerBound)
                 else:
-                    optDict[requirement.name] = nevergrad.p.Scalar(upper= requirement.upperBound)
+                    optDict[requirement.name] = nevergrad.p.Scalar(upper= upperBound) 
+                #if requirement.lowerBound is not None and requirement.upperBound is not None:
+                    #optDict[requirement.name] = nevergrad.p.Scalar(lower= requirement.lowerBound, upper= requirement.upperBound)
+                #elif requirement.lowerBound is None and requirement.upperBound is None:
+                    #optDict[requirement.name] = nevergrad.p.Scalar()
+                #elif requirement.lowerBound is not None and requirement.upperBound is None:
+                    #optDict[requirement.name] = nevergrad.p.Scalar(lower= requirement.lowerBound)
+                #else:
+                    #optDict[requirement.name] = nevergrad.p.Scalar(upper= requirement.upperBound) 
                 newValueForInputVektor = requirement.autoStart
                 #lowerBoundList.append(requirement.lowerBound)
                 #upperBoundList.append(requirement.upperBound)
@@ -607,7 +704,7 @@ def startAutoAnalyses(autoInputTemplate: taskAndRequirementsTemplateClasses.auto
         #    sigmaScalingList.append(sigmas / minSigma)
         #print(f"This is the list of input sigmas: {inputSigmas} its scaling list {sigmaScalingList} and this the lowerBoundList: {lowerBoundList} and this is the upperBoundList: {upperBoundList}")
         neverDict = nevergrad.p.Dict(**optDict)
-        optimizerList.append({"name":uniqueAlgos, "optimizer": nevergrad.optimizers.NGOpt(parametrization= neverDict, budget= 100, num_workers= getNumberOfWorkersForAlgo(uniqueAlgos)), "listOfTaskIds": [], "hardParameters":hardParameters, "softParameters":softParameterList, "logs":autoInputTemplate.logs, "listOfMatchingParameters": []}) #cma.evolution_strategy.CMAEvolutionStrategy(inputVektor, minSigma, {"bounds": [lowerBoundList, upperBoundList], "maxiter": 100, "ftarget": 0.01, "maxfevals": 1000, "CMA_stds": sigmaScalingList})
+        optimizerList.append({"name":uniqueAlgos, "optimizer": nevergrad.optimizers.NGOpt(parametrization= neverDict, budget= 250, num_workers= getNumberOfWorkersForAlgo(uniqueAlgos)), "listOfTaskIds": [], "hardParameters":hardParameters, "softParameters":softParameterList, "logs":autoInputTemplate.logs, "listOfMatchingParameters": []}) #cma.evolution_strategy.CMAEvolutionStrategy(inputVektor, minSigma, {"bounds": [lowerBoundList, upperBoundList], "maxiter": 100, "ftarget": 0.01, "maxfevals": 1000, "CMA_stds": sigmaScalingList})
     optimizingTaskId = uuid.uuid4().hex
     with optimizerStoreLock:
         optimizerListStoreGlobal.append({"optimizingTaskId":optimizingTaskId, "listOfOptimizers": optimizerList, "fitnessGoal": autoInputTemplate.minimumFitness, "precisionGoal": autoInputTemplate.minimumPrecision})
@@ -694,8 +791,9 @@ def startNextIteration(searchedTask, algoRequirementsList, workerFilePointerList
                                                     realParameterMatches.score = matchElement.score
                                                     newTellListRecord = (realParameterMatches.candidate, matchElementScore)
                                                     newTellList.append(newTellListRecord)
-                                        for candidateElement, resultElement in newTellList:       
-                                            optimizerReal["optimizer"].tell(candidateElement, resultElement)
+                                        for candidateElement, resultElement in newTellList:
+                                            if optimizerReal["optimizer"].num_tell < optimizerReal["optimizer"].budget:     
+                                                optimizerReal["optimizer"].tell(candidateElement, resultElement)
                                         shouldWeProceed = True
                                         if optimizerReal["optimizer"].num_tell >= optimizerReal["optimizer"].budget:
                                             shouldWeProceed = False

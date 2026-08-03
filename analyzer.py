@@ -10,6 +10,14 @@ import json
 
 globablAnalyzerStorage = []
 
+def getMaxTraceLength(inputLog):
+    traceVariants = pm4py.statistics.variants.pandas.get.get_variants_count(inputLog)
+    maxLength = 0
+    for trace, score in traceVariants.items():
+        if len(trace) > maxLength:
+            maxLength = len(trace)
+    return maxLength
+
 def evalRunResultForParameterSearch(precision, fitness, targetPrecision, targetFitness):
     precisionDistance = abs(targetPrecision - precision)
     fitnessDistance = abs(targetFitness - fitness)
@@ -72,8 +80,14 @@ def convertToPetriNet(processModel):
             print(f"The conversion failed with: {exceptionMessage}", flush= True)
             return None, None, None, False
     elif isinstance(processModel, pm4py.objects.log.obj.EventLog) or isinstance(processModel, pandas.DataFrame):
+        if isinstance(processModel, pm4py.objects.log.obj.EventLog):
+            print("Convert log to pandas.Dataframe.", flush= True)
+            resultLog = pm4py.objects.conversion.log.converter.apply(log= processModel, variant= pm4py.objects.conversion.log.converter.Variants.TO_DATA_FRAME)
+            resultLog = orderDataFrame(resultLog)
+        else:
+            resultLog = orderDataFrame(processModel)
         try:
-            comparisonObject, initial, final = pm4py.discovery.discover_petri_net_inductive(processModel)
+            comparisonObject, initial, final = pm4py.discovery.discover_petri_net_inductive(resultLog)
         except Exception as exceptionMessageTwo:
             print(f"The conversion failed with: {exceptionMessageTwo}", flush= True)
             return None, None, None, False
@@ -91,9 +105,66 @@ def calculatePrecisionOfPetriNet(groundTruthEventLog, comparisonObject, initial,
 
 def calculateFitnessOfPetriNet(groundTruthEventLog, comparisonObject, initial, final):
     fitnessDict = pm4py.conformance.fitness_token_based_replay(groundTruthEventLog, comparisonObject, initial, final)
-    fitness = fitnessDict["log_fitness"]
+    fitness = fitnessDict["log_fitness"] #log_fitness and the 100.0 were not there prior to the change. Previous: "percentage_of_fitting_traces"/100.0
     print(f"The fitness is: {fitness}", flush= True)
     return fitness
+
+def makeLogsToOrderedDataframes(groundTruthEventLog, anonymizedEventLog):
+    if isinstance(groundTruthEventLog, pm4py.objects.log.obj.EventLog):
+        print("Convert log to pandas.Dataframe.", flush= True)
+        groundTruthLog = pm4py.objects.conversion.log.converter.apply(log= groundTruthEventLog, variant= pm4py.objects.conversion.log.converter.Variants.TO_DATA_FRAME)
+        groundTruthLog = orderDataFrame(groundTruthLog)
+    else:
+        groundTruthLog = orderDataFrame(groundTruthEventLog)
+    if isinstance(anonymizedEventLog, pm4py.objects.log.obj.EventLog):
+        print("Convert log to pandas.Dataframe.", flush= True)
+        resultLog = pm4py.objects.conversion.log.converter.apply(log= anonymizedEventLog, variant= pm4py.objects.conversion.log.converter.Variants.TO_DATA_FRAME)
+        resultLog = orderDataFrame(resultLog)
+    else:
+        resultLog = orderDataFrame(anonymizedEventLog)
+    return groundTruthLog, resultLog
+
+def calculatePrecisionOfLog(groundTruthEventLog, anonymizedEventLog):
+    groundTruthLog, resultLog = makeLogsToOrderedDataframes(groundTruthEventLog, anonymizedEventLog)
+    traceVariantsGroundTruth = pm4py.statistics.variants.pandas.get.get_variants_count(groundTruthLog)
+    traceVariantsResult = pm4py.statistics.variants.pandas.get.get_variants_count(resultLog)
+    failureSum = 0.0
+    allTraces = 0.0
+    for resultTrace, resultTraceCount in traceVariantsResult.items():
+        allTraces = allTraces + float(resultTraceCount)
+        existedInLog = False
+        for groundTrace, groundTraceCount in traceVariantsGroundTruth.items():
+            if resultTrace == groundTrace:
+                existedInLog = True
+                difference = float(resultTraceCount) - (groundTraceCount)
+                if difference > 0.0:
+                    failureSum = failureSum + difference
+        if existedInLog == False:
+            failureSum = failureSum + float(resultTraceCount)
+    preciseTraces = allTraces - failureSum
+    precision = preciseTraces/allTraces
+    return precision
+
+def calculateFitnessOfLog(groundTruthEventLog, anonymizedEventLog):
+    groundTruthLog, resultLog = makeLogsToOrderedDataframes(groundTruthEventLog, anonymizedEventLog)
+    traceVariantsGroundTruth = pm4py.statistics.variants.pandas.get.get_variants_count(groundTruthLog)
+    traceVariantsResult = pm4py.statistics.variants.pandas.get.get_variants_count(resultLog)
+    failureSum = 0.0
+    allTraces = 0.0
+    for groundTrace, groundTraceCount in traceVariantsGroundTruth.items():
+        allTraces = allTraces + float(groundTraceCount)
+        existedInLog = False
+        for resultTrace, resultTraceCount in traceVariantsResult.items():
+            if groundTrace == resultTrace:
+                existedInLog = True
+                difference = float(groundTraceCount) - float(resultTraceCount)
+                if difference > 0.0:
+                    failureSum = failureSum + difference
+        if existedInLog == False:
+            failureSum = failureSum + float(groundTraceCount)
+    fitTraces = allTraces - failureSum
+    fitness = fitTraces/allTraces
+    return
 
 def resultSufficient(groundTruth, runResult):
     print("Begin Testing if the result matches the requirements.")
@@ -334,7 +405,11 @@ def executeAnalysis(analysesResults, groundTruth, additionalInformation):
     groundTruthKAnonymity = toolboxForAnalysis.calculateKAnonymity(groundTruthLog)
     groundTruthCaseDisclosureRisk= calculateCaseDisclosureRiskForEventLog(groundTruthLog, groundTruthLog)
     groundTruthTraceDisclosureRisk= calculateTraceDisclosureRiskForEventLog(groundTruthLog, groundTruthLog)
-    groundTruthUtilityAndPrivacy = taskAndRequirementsTemplateClasses.groundTruthUtilityAndPrivacyData(precision= groundTruthPrecision, fitness= groundTruthFitness, k_anonymity= groundTruthKAnonymity, caseDisclosureRisk= groundTruthCaseDisclosureRisk, traceDisclosureRisk= groundTruthTraceDisclosureRisk)
+    traceVariantsGroundTruth = pm4py.statistics.variants.pandas.get.get_variants_count(groundTruthLog)
+    groundTruthStructure = []
+    for groundTrace, groundCount in traceVariantsGroundTruth.items():
+        groundTruthStructure.append({"traceVariant": groundTrace, "traceVariantCount": groundCount})
+    groundTruthUtilityAndPrivacy = taskAndRequirementsTemplateClasses.groundTruthUtilityAndPrivacyData(precision= groundTruthPrecision, fitness= groundTruthFitness, k_anonymity= groundTruthKAnonymity, caseDisclosureRisk= groundTruthCaseDisclosureRisk, traceDisclosureRisk= groundTruthTraceDisclosureRisk, logStructure= groundTruthStructure)
     newEvaluationReport.groundTruthUtilityAndPrivacy = groundTruthUtilityAndPrivacy
     for results in analysesResults:
         petriNet, initial, final, successful = convertToPetriNet(results.outputModel)
@@ -343,6 +418,7 @@ def executeAnalysis(analysesResults, groundTruth, additionalInformation):
         caseDisclosureRiskList = []
         traceDisclosureRiskList = []
         k_anonymity = None
+        resultLogStructure = None
         if successful:
             print(f"This is the groundTruthStorage before it fails: {groundTruth}", flush= True)
             precision = calculatePrecisionOfPetriNet(groundTruth["eventLog"], petriNet, initial, final)
@@ -359,7 +435,11 @@ def executeAnalysis(analysesResults, groundTruth, additionalInformation):
             caseDisclosureRiskList = calculateCaseDisclosureRiskForEventLog(groundTruthLog, resultLog)
             traceDisclosureRiskList = calculateTraceDisclosureRiskForEventLog(groundTruthLog, resultLog)
             k_anonymity = toolboxForAnalysis.calculateKAnonymity(resultLog)
-        runEvaluation = taskAndRequirementsTemplateClasses.runEvaluation(fileName= results.fileName, precision= precision, fitness= fitness, caseDisclosureRisk= caseDisclosureRiskList, traceDisclosureRisk= traceDisclosureRiskList, k_anonymity= k_anonymity, inputParameters= results.inputParameters)
+            traceVariantsResult = pm4py.statistics.variants.pandas.get.get_variants_count(resultLog)
+            resultLogStructure = []
+            for resultTrace, resultCount in traceVariantsResult.items():
+                resultLogStructure.append({"traceVariant": resultTrace, "traceVariantCount": resultCount})
+        runEvaluation = taskAndRequirementsTemplateClasses.runEvaluation(fileName= results.fileName, precision= precision, fitness= fitness, caseDisclosureRisk= caseDisclosureRiskList, traceDisclosureRisk= traceDisclosureRiskList, k_anonymity= k_anonymity, inputParameters= results.inputParameters, logStructure= resultLogStructure)
         exists = False
         for algoEvaluations in newEvaluationReport.evaluationOfAlgos:
             if algoEvaluations.name == results.identification.name:

@@ -12,6 +12,10 @@ class algoVariableFloat(BaseModel):
     autoAdept: bool
     autoStart: float | None
     autoSigma: float | None
+    keyWordBoundUpper: str | None
+    keyWordBoundLower: str | None
+    relativeInitial: float | None
+    choice: str | None
     type: Literal["float"] = "float"
 
 class algoVariableInt(BaseModel):
@@ -21,6 +25,10 @@ class algoVariableInt(BaseModel):
     autoAdept: bool
     autoStart: int | None
     autoSigma: int | None
+    keyWordBoundUpper: str | None
+    keyWordBoundLower: str | None
+    relativeInitial: float | None
+    choice: str | None
     type: Literal["int"] = "int"
 
 class algoVariableBool(BaseModel):
@@ -155,6 +163,7 @@ class runEvaluation(BaseModel):
     traceDisclosureRisk: list | None
     k_anonymity: int | None
     inputParameters: list
+    logStructure: list | None
 
 class algoEvaluation(BaseModel):
     name: str
@@ -166,6 +175,7 @@ class groundTruthUtilityAndPrivacyData(BaseModel):
     k_anonymity: int | None
     caseDisclosureRisk: list | None
     traceDisclosureRisk: list | None
+    logStructure: list
 
 class evaluationReport(BaseModel):
     inputEventLog: logNamesOfTheLog
